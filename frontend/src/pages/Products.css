@@ -37,6 +37,6 @@
 .product-detail-row code {
   background: var(--bg-body);
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 12px;
   font-size: 13px;
 }

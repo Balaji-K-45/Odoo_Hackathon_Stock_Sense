@@ -1,19 +1,99 @@
 // ──────────────────────────────────────────────────────────
-// src/pages/Profile.jsx — User profile & role specifications
+// src/pages/Profile.jsx — Personal profile & account settings
 // ──────────────────────────────────────────────────────────
 
 import { useAuth } from "../context/AuthContext";
-import { USE_MOCKS } from "../services/api";
 import { changePassword } from "../services/authApi";
 import { useState } from "react";
 import "./Operations.css";
 
+const AVATAR_OPTIONS = ["👨‍💼", "👷", "👩‍💼", "🧑‍💼", "👨‍🔧", "👩‍🔧"];
+
+function getDefaultAvatar(isStaff) {
+  return isStaff ? "👷" : "👨‍💼";
+}
+
+function getRoleLabel(role) {
+  if (!role) return "Inventory Manager";
+  return role === "WAREHOUSE_STAFF" ? "Warehouse Employee" : "Inventory Manager";
+}
+
 export default function Profile() {
-  const { user, isStaff, switchRole } = useAuth();
+  const { user, token, isStaff, loginUser } = useAuth();
+  const [isEditing, setIsEditing] = useState(false);
+  const [profileForm, setProfileForm] = useState(() => ({
+    name: user?.name || "",
+    email: user?.email || "",
+    avatar: user?.avatar || getDefaultAvatar(isStaff),
+  }));
+  const [profileMessage, setProfileMessage] = useState("");
+  const [profileError, setProfileError] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+
   const [passwords, setPasswords] = useState({ current: "", next: "", confirm: "" });
   const [passwordMessage, setPasswordMessage] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [savingPassword, setSavingPassword] = useState(false);
+
+  function handleProfileChange(event) {
+    const { name, value } = event.target;
+    setProfileForm((current) => ({ ...current, [name]: value }));
+  }
+
+  function handleAvatarSelect(avatar) {
+    setProfileForm((current) => ({ ...current, avatar }));
+  }
+
+  function handleEditCancel() {
+    setIsEditing(false);
+    setProfileMessage("");
+    setProfileError("");
+    setProfileForm({
+      name: user?.name || "",
+      email: user?.email || "",
+      avatar: user?.avatar || getDefaultAvatar(isStaff),
+      role: user?.role || (isStaff ? "WAREHOUSE_STAFF" : "INVENTORY_MANAGER"),
+    });
+  }
+
+  function openEditProfile() {
+    setProfileForm({
+      name: user?.name || "",
+      email: user?.email || "",
+      avatar: user?.avatar || getDefaultAvatar(isStaff),
+    });
+    setIsEditing(true);
+  }
+
+  async function saveProfile(event) {
+    event.preventDefault();
+    setProfileError("");
+    setProfileMessage("");
+
+    if (!profileForm.name.trim()) {
+      setProfileError("Name is required.");
+      return;
+    }
+
+    setSavingProfile(true);
+    try {
+      const nextUser = {
+        ...user,
+        name: profileForm.name.trim(),
+        email: profileForm.email || user?.email || "",
+        avatar: profileForm.avatar,
+        displayRole: getRoleLabel(user?.role),
+      };
+
+      loginUser(token || "mock-jwt-token-stocksense", nextUser);
+      setProfileMessage("Profile updated successfully");
+      setIsEditing(false);
+    } catch (error) {
+      setProfileError(error.message || "Unable to update profile");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
 
   async function savePassword(event) {
     event.preventDefault();
@@ -44,89 +124,129 @@ export default function Profile() {
     <div>
       <div className="page-header">
         <div>
-          <h1>User Profile &amp; Role Details</h1>
-          <p className="page-header-subtitle">Target persona configuration and system permissions</p>
+          <h1>My Profile</h1>
+          <p className="page-header-subtitle">Manage your account details and security</p>
         </div>
       </div>
 
-      <div className="section-card" style={{ maxWidth: 560 }}>
+      <div className="section-card profile-shell">
         <div className="profile-header">
-          <div className="profile-avatar">
-            {isStaff ? "👷" : "👨‍💼"}
-          </div>
-          <div>
+          <div className="profile-avatar">{profileForm.avatar || getDefaultAvatar(isStaff)}</div>
+          <div className="profile-meta">
             <h2 className="profile-name">{user?.name || "User"}</h2>
-            <span className="profile-role">
-              {user?.role || "Inventory Manager"}
-            </span>
+            <span className="profile-role">{getRoleLabel(profileForm.role || user?.role)}</span>
+            <div className="profile-actions">
+              {!isEditing ? (
+                <button type="button" className="btn btn--secondary" onClick={openEditProfile}>
+                  Edit Profile
+                </button>
+              ) : (
+                <>
+                  <button type="button" className="btn btn--secondary" onClick={handleEditCancel}>
+                    Cancel
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="profile-details">
-          <div className="profile-row">
-            <span className="profile-label">Full Name</span>
-            <span className="profile-value">{user?.name || "—"}</span>
-          </div>
-          <div className="profile-row">
-            <span className="profile-label">Email</span>
-            <span className="profile-value">{user?.email || "—"}</span>
-          </div>
-          <div className="profile-row">
-            <span className="profile-label">Target Role</span>
-            <span className="profile-value" style={{ fontWeight: 600 }}>
-              {user?.role || "—"}
-            </span>
-          </div>
-          <div className="profile-row">
-            <span className="profile-label">Role Scope</span>
-            <span className="profile-value">
-              {isStaff
-                ? "Transfers, Picking, Shelving, Physical Inventory Counting"
-                : "Incoming & Outgoing Stock, Supplier Receipts, Delivery Orders, Product Catalog"}
-            </span>
-          </div>
-        </div>
+        {isEditing ? (
+          <form onSubmit={saveProfile} className="profile-edit-form">
+            {profileError && <div className="auth-error" role="alert">{profileError}</div>}
+            {profileMessage && <div className="auth-success" role="status">{profileMessage}</div>}
 
-        <div style={{ marginTop: 24, paddingTop: 18, borderTop: "1px solid var(--border-color)" }}>
-          <h4 style={{ margin: "0 0 10px", fontSize: 14 }}>Role Description</h4>
-          <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 16px" }}>
-            {isStaff
-              ? "As Warehouse Staff, you are on the floor moving physical goods. You execute internal warehouse transfers (relocating goods between aisles/shelves), pick items for outgoing orders, stock new items on shelves, and perform cycle counts."
-              : "As an Inventory Manager, you maintain operational oversight over the entire supply chain. You monitor stock levels, process incoming receipts from suppliers, validate customer delivery orders, set minimum stock rules, and manage warehouse locations."}
-          </p>
+            <div className="form-group">
+              <label className="form-label" htmlFor="profile-name">Full name</label>
+              <input
+                id="profile-name"
+                className="form-input"
+                name="name"
+                type="text"
+                value={profileForm.name}
+                onChange={handleProfileChange}
+              />
+            </div>
 
-          {USE_MOCKS && <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={() => switchRole(isStaff ? "Inventory Manager" : "Warehouse Staff")}
-          >
-            Switch to {isStaff ? "Inventory Manager" : "Warehouse Staff"} Persona ⇄
-          </button>}
-        </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="profile-email">Email</label>
+              <input
+                id="profile-email"
+                className="form-input"
+                name="email"
+                type="email"
+                value={profileForm.email}
+                onChange={handleProfileChange}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Profile picture</label>
+              <div className="avatar-picker">
+                {AVATAR_OPTIONS.map((avatar) => (
+                  <button
+                    key={avatar}
+                    type="button"
+                    className={`avatar-option ${profileForm.avatar === avatar ? "selected" : ""}`}
+                    onClick={() => handleAvatarSelect(avatar)}
+                    aria-label={`Set avatar ${avatar}`}
+                  >
+                    {avatar}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button className="btn btn--primary" type="submit" disabled={savingProfile}>
+              {savingProfile ? "Saving..." : "Save Changes"}
+            </button>
+          </form>
+        ) : (
+          <div className="profile-details">
+            <div className="profile-row">
+              <span className="profile-label">Full Name</span>
+              <span className="profile-value">{user?.name || "—"}</span>
+            </div>
+            <div className="profile-row">
+              <span className="profile-label">Email</span>
+              <span className="profile-value">{user?.email || "—"}</span>
+            </div>
+            <div className="profile-row">
+              <span className="profile-label">Role</span>
+              <span className="profile-value">{getRoleLabel(user?.role)}</span>
+            </div>
+            <div className="profile-row">
+              <span className="profile-label">Profile Picture</span>
+              <span className="profile-value profile-avatar-inline">{user?.avatar || getDefaultAvatar(isStaff)}</span>
+            </div>
+          </div>
+        )}
       </div>
 
-      <section className="section-card" style={{ maxWidth: 560, marginTop: 20 }}>
-        <h2 style={{ marginTop: 0 }}>Change Password</h2>
-        <form className="auth-form" onSubmit={savePassword}>
-          {passwordError && <div className="auth-error" role="alert">{passwordError}</div>}
-          {passwordMessage && <div className="auth-success" role="status">{passwordMessage}</div>}
-          <div className="form-group">
-            <label className="form-label" htmlFor="current-password">Current password</label>
-            <input id="current-password" className="form-input" type="password" autoComplete="current-password" required value={passwords.current} onChange={(event) => setPasswords({ ...passwords, current: event.target.value })} />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="new-password">New password</label>
-            <input id="new-password" className="form-input" type="password" autoComplete="new-password" minLength={8} required value={passwords.next} onChange={(event) => setPasswords({ ...passwords, next: event.target.value })} />
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="confirm-password">Confirm new password</label>
-            <input id="confirm-password" className="form-input" type="password" autoComplete="new-password" minLength={8} required value={passwords.confirm} onChange={(event) => setPasswords({ ...passwords, confirm: event.target.value })} />
-          </div>
-          <button className="btn btn--primary" type="submit" disabled={savingPassword}>
-            {savingPassword ? "Updating..." : "Update Password"}
-          </button>
-        </form>
-      </section>
+      {isEditing && (
+        <section className="section-card profile-shell" style={{ marginTop: 20 }}>
+          <h2 style={{ marginTop: 0 }}>Change Password</h2>
+          <form className="auth-form" onSubmit={savePassword}>
+            {passwordError && <div className="auth-error" role="alert">{passwordError}</div>}
+            {passwordMessage && <div className="auth-success" role="status">{passwordMessage}</div>}
+            <div className="form-group">
+              <label className="form-label" htmlFor="current-password">Current password</label>
+              <input id="current-password" className="form-input" type="password" autoComplete="current-password" required value={passwords.current} onChange={(event) => setPasswords({ ...passwords, current: event.target.value })} />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="new-password">New password</label>
+              <input id="new-password" className="form-input" type="password" autoComplete="new-password" minLength={8} required value={passwords.next} onChange={(event) => setPasswords({ ...passwords, next: event.target.value })} />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="confirm-password">Confirm new password</label>
+              <input id="confirm-password" className="form-input" type="password" autoComplete="new-password" minLength={8} required value={passwords.confirm} onChange={(event) => setPasswords({ ...passwords, confirm: event.target.value })} />
+            </div>
+            <button className="btn btn--primary" type="submit" disabled={savingPassword}>
+              {savingPassword ? "Updating..." : "Update Password"}
+            </button>
+          </form>
+        </section>
+      )}
     </div>
   );
 }

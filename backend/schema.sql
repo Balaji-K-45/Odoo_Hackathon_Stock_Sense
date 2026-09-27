@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
     email         VARCHAR(255) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     role          ENUM('INVENTORY_MANAGER','WAREHOUSE_STAFF') NOT NULL DEFAULT 'WAREHOUSE_STAFF',
+    email_verified TINYINT(1) NOT NULL DEFAULT 1,
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
 ) ENGINE=InnoDB;
@@ -122,13 +123,15 @@ CREATE TABLE IF NOT EXISTS stock_ledger (
     FOREIGN KEY (user_id)      REFERENCES users(id)
 ) ENGINE=InnoDB;
 
--- ── OTP tokens for password reset ─────────────────────────────────────────
+-- ── Purpose-scoped OTPs and password-reset grants (HMAC hashes) ────────────
 CREATE TABLE IF NOT EXISTS otp_tokens (
     id         INT          NOT NULL AUTO_INCREMENT,
     email      VARCHAR(255) NOT NULL,
-    otp        VARCHAR(10)  NOT NULL,
+    otp        VARCHAR(64)  NOT NULL,
+    purpose    VARCHAR(30)  NOT NULL DEFAULT 'password_reset',
     expires_at DATETIME     NOT NULL,
     used       TINYINT(1)   NOT NULL DEFAULT 0,
+    attempt_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
     created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     INDEX idx_otp_email (email)

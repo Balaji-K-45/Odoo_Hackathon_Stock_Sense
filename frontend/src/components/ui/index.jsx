@@ -3,6 +3,32 @@
 // src/components/ui/
 // ──────────────────────────────────────────────────────────
 
+export function Button({ variant = "primary", size = "md", className = "", children, ...props }) {
+  return (
+    <button className={`btn btn--${variant} ${size !== "md" ? `btn--${size}` : ""} ${className}`.trim()} {...props}>
+      {children}
+    </button>
+  );
+}
+
+export function Card({ as: Element = "section", className = "", children, ...props }) {
+  return <Element className={`clay-card ${className}`.trim()} {...props}>{children}</Element>;
+}
+
+export function Input({ label, error, className = "", ...props }) {
+  return (
+    <label className="clay-input-field">
+      {label && <span className="form-label">{label}</span>}
+      <input className={`clay-input ${className}`.trim()} {...props} />
+      {error && <span className="form-error">{error}</span>}
+    </label>
+  );
+}
+
+export function Badge({ tone = "default", children }) {
+  return <span className={`clay-badge clay-badge--${tone}`}>{children}</span>;
+}
+
 // ── KPICard ──────────────────────────────────────────────
 export function KPICard({ title, value, icon, color = "primary", subtitle }) {
   return (

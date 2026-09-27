@@ -5,15 +5,33 @@
 .dashboard-layout {
   min-height: 100vh;
   background: var(--bg-body);
+  position: relative;
+  overflow-x: hidden;
 }
 
 .dashboard-main {
   margin-left: var(--sidebar-width);
   margin-top: var(--navbar-height);
-  padding: 28px 32px;
+  padding: 36px 40px 48px;
   min-height: calc(100vh - var(--navbar-height));
   animation: fadeIn 0.3s ease;
 }
+
+.dashboard-main::before,
+.dashboard-main::after {
+  content: "";
+  position: fixed;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.28;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.dashboard-main::before { background: #c4b5fd; top: 12%; right: 4%; }
+.dashboard-main::after { background: #f9a8d4; bottom: 4%; left: 18%; }
 
 @media (max-width: 768px) {
   .dashboard-main {

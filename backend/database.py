@@ -99,6 +99,30 @@ def init_db():
                 stmt = statement.strip()
                 if stmt:
                     cursor.execute(stmt)
+
+            cursor.execute("SHOW COLUMNS FROM users LIKE 'email_verified'")
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    "ALTER TABLE users ADD COLUMN email_verified TINYINT(1) NOT NULL DEFAULT 1"
+                )
+
+            cursor.execute("SHOW COLUMNS FROM otp_tokens LIKE 'purpose'")
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    "ALTER TABLE otp_tokens ADD COLUMN purpose VARCHAR(30) NOT NULL DEFAULT 'password_reset'"
+                )
+
+            cursor.execute("SHOW COLUMNS FROM otp_tokens LIKE 'otp'")
+            otp_column = cursor.fetchone()
+            if otp_column and str(otp_column[1]).lower() != "varchar(64)":
+                cursor.execute("ALTER TABLE otp_tokens MODIFY otp VARCHAR(64) NOT NULL")
+                cursor.execute("UPDATE otp_tokens SET used=1 WHERE used=0")
+
+            cursor.execute("SHOW COLUMNS FROM otp_tokens LIKE 'attempt_count'")
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    "ALTER TABLE otp_tokens ADD COLUMN attempt_count TINYINT UNSIGNED NOT NULL DEFAULT 0"
+                )
         print("[StockSense] MySQL database initialised successfully.")
     finally:
         conn.close()

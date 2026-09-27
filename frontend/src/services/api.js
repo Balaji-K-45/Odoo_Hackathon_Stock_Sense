@@ -34,14 +34,16 @@ async function handleResponse(response) {
       message = message || "Session expired or unauthorized. Please log in.";
       break;
     case 403:
-      // Explicit requirement: "You don't have permission for this action."
-      message = "You don't have permission for this action.";
+      message = message || "You don't have permission for this action.";
       break;
     case 404:
       message = message || "Requested resource not found.";
       break;
     case 409:
       message = message || "Conflict or insufficient stock for this operation.";
+      break;
+    case 429:
+      message = message || "Please wait before requesting another code.";
       break;
     case 500:
       message = message || "Internal server error. Please try again later.";
@@ -53,6 +55,7 @@ async function handleResponse(response) {
 
   const err = new Error(message);
   err.status = response.status;
+  err.retryAfter = response.headers.get("Retry-After");
   err.isForbidden = response.status === 403;
   err.data = errorBody;
   throw err;

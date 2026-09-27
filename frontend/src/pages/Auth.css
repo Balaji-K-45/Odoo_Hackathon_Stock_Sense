@@ -7,13 +7,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+  background:
+    radial-gradient(circle at 18% 18%, rgba(124, 58, 237, 0.18), transparent 28%),
+    radial-gradient(circle at 84% 82%, rgba(219, 39, 119, 0.14), transparent 28%),
+    var(--bg-body);
   padding: 24px;
 }
 
 .auth-card {
   background: var(--bg-surface);
-  border-radius: var(--radius-xl);
+  border-radius: 48px;
   box-shadow: var(--shadow-xl);
   width: 100%;
   max-width: 440px;
@@ -26,7 +29,7 @@
 }
 
 .auth-brand {
-  background: linear-gradient(135deg, var(--primary) 0%, #6366f1 100%);
+  background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
   padding: 30px 32px 24px;
   text-align: center;
   color: #fff;

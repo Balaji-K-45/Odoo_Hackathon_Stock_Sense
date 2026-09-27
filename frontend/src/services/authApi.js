@@ -127,6 +127,17 @@ export async function signup(data) {
   return { ...response, ...response.data };
 }
 
+export async function verifySignupOtp(email, otp) {
+  if (USE_MOCKS) {
+    await delay(400);
+    if (String(otp || "") === "123456") {
+      return { success: true, message: "Email verified" };
+    }
+    throw new Error("Invalid verification code");
+  }
+  return apiPost("/api/auth/verify-signup-otp", { email, otp });
+}
+
 export async function forgotPassword(email) {
   if (USE_MOCKS) {
     await delay(400);
@@ -138,30 +149,26 @@ export async function forgotPassword(email) {
 export async function verifyOtp(email, otp) {
   if (USE_MOCKS) {
     await delay(400);
-    if (otp === "568723") {
-      return { success: true, message: "OTP verified" };
+    if (otp === "123456") {
+      return { success: true, data: { reset_token: "mock-reset-grant" } };
     }
-    throw new Error("Invalid OTP (use 568723 for demo)");
+    throw new Error("Invalid OTP");
   }
   return apiPost("/api/auth/verify-otp", { email, otp });
 }
 
-export async function loginWithOtp(email, otp) {
-  if (USE_MOCKS) {
-    await delay(250);
-    if (otp !== "568723") throw new Error("Invalid sign-in code (use 568723 in mock mode)");
-    return { success: true, token: `${MOCK_TOKEN}-staff`, user: DEMO_ACCOUNTS.staff };
-  }
-  const response = await apiPost("/api/auth/otp-login", { email, otp });
-  return { ...response, ...response.data };
-}
-
-export async function resetPassword(email, otp, newPassword) {
+export async function resetPassword(email, resetToken, newPassword) {
   if (USE_MOCKS) {
     await delay(400);
+    if (resetToken !== "mock-reset-grant") throw new Error("Password reset authorization is invalid or expired");
     return { success: true, message: "Password reset successfully" };
   }
-  return apiPost("/api/auth/reset-password", { email, otp, new_password: newPassword });
+  const response = await apiPost("/api/auth/reset-password", {
+    email,
+    reset_token: resetToken,
+    new_password: newPassword,
+  });
+  return { ...response, ...response.data };
 }
 
 export async function changePassword(currentPassword, newPassword) {

@@ -2,11 +2,10 @@
 // src/pages/ForgotPassword.jsx — OTP-based password reset to mail
 // ──────────────────────────────────────────────────────────
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { forgotPassword, verifyOtp } from "../services/authApi";
-import { loginWithOtp } from "../services/authApi";
-import { useAuth } from "../context/AuthContext";
+import { USE_MOCKS } from "../services/api";
 import "./Auth.css";
 
 export default function ForgotPassword() {
@@ -15,8 +14,24 @@ export default function ForgotPassword() {
   const [otp, setOtp]         = useState("");
   const [error, setError]     = useState("");
   const [loading, setLoading] = useState(false);
-  const { loginUser } = useAuth();
+  const [simulatedMail, setSimulatedMail] = useState(null);
+  const [resendSeconds, setResendSeconds] = useState(0);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!resendSeconds) return undefined;
+    const timer = window.setTimeout(() => setResendSeconds((seconds) => seconds - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendSeconds]);
+
+  function updateMockMail() {
+    setSimulatedMail(USE_MOCKS ? {
+      to: email,
+      code: "123456",
+      expiresIn: "10 minutes",
+      timestamp: new Date().toLocaleTimeString(),
+    } : null);
+  }
 
   async function handleSendOtp(e) {
     e.preventDefault();
@@ -29,8 +44,27 @@ export default function ForgotPassword() {
     setLoading(true);
     try {
       await forgotPassword(email);
+      updateMockMail();
+      setOtp("");
+      setResendSeconds(30);
       setStep("otp");
     } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResendOtp() {
+    setError("");
+    setLoading(true);
+    try {
+      await forgotPassword(email);
+      updateMockMail();
+      setOtp("");
+      setResendSeconds(30);
+    } catch (err) {
+      if (err.status === 429) setResendSeconds(Number(err.retryAfter) || 30);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -47,14 +81,19 @@ export default function ForgotPassword() {
 
     setLoading(true);
     try {
-      const result = await loginWithOtp(email, otp);
-      loginUser(result.token, result.user);
-      navigate("/dashboard");
+      const response = await verifyOtp(email, otp);
+      const resetToken = response.data?.reset_token;
+      if (!resetToken) throw new Error("Password reset authorization was not issued");
+      navigate("/reset-password", { state: { email, resetToken } });
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleAutoFillOtp() {
+    setOtp("123456");
   }
 
   return (
@@ -70,7 +109,7 @@ export default function ForgotPassword() {
           <form className="auth-form" onSubmit={handleSendOtp}>
             <h2>Reset Password</h2>
             <p className="auth-desc">
-              Enter the email address used for your account to continue to code verification.
+              Enter the email address used for your account. We will send a secure 6-digit code to that inbox.
             </p>
 
             {error && <div className="auth-error">{error}</div>}
@@ -101,10 +140,37 @@ export default function ForgotPassword() {
           </form>
         ) : (
           <form className="auth-form" onSubmit={handleVerifyOtp}>
-            <h2>Enter Verification Code</h2>
+            <h2>Verify Mail OTP</h2>
             <p className="auth-desc">
-              Enter the 6-digit code for <strong>{email}</strong> to sign in.
+              If this address is registered and email is available, a code will be sent to <strong>{email}</strong>.
             </p>
+
+            {/* Simulated Live Mail Inbox Notification for Hackathon Judges */}
+            {simulatedMail && (
+              <div className="simulated-mail-card">
+                <div className="mail-card-header">
+                  <span className="mail-icon">📨</span>
+                  <div>
+                    <strong>Mail Notification: Password Reset OTP</strong>
+                    <div className="mail-sender">From: security@stocksense.com • {simulatedMail.timestamp}</div>
+                  </div>
+                </div>
+                <div className="mail-card-body">
+                  <p>Your one-time security verification code is:</p>
+                  <div className="mail-otp-box">
+                    <span className="mail-otp-digits">{simulatedMail.code}</span>
+                    <button
+                      type="button"
+                      className="mail-autofill-btn"
+                      onClick={handleAutoFillOtp}
+                    >
+                      ⚡ Auto-fill
+                    </button>
+                  </div>
+                  <span className="mail-expiry">Valid for {simulatedMail.expiresIn}. Do not share with anyone.</span>
+                </div>
+              </div>
+            )}
 
             {error && <div className="auth-error">{error}</div>}
 
@@ -112,10 +178,12 @@ export default function ForgotPassword() {
               <label className="form-label">6-Digit Code</label>
               <input
                 type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
                 className="form-input otp-input"
                 value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                placeholder="Enter 6-digit code"
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="Enter the code from your email"
                 maxLength={6}
                 required
               />
@@ -126,38 +194,32 @@ export default function ForgotPassword() {
               className="btn btn--primary btn--lg auth-submit"
               disabled={loading}
             >
-              {loading ? "Signing in..." : "Verify Code & Sign In"}
-            </button>
-
-            <button
-              type="button"
-              className="auth-link-btn"
-              disabled={loading}
-              onClick={async () => {
-                setError("");
-                setLoading(true);
-                try {
-                  await verifyOtp(email, otp);
-                  navigate(`/reset-password?email=${encodeURIComponent(email)}&otp=${encodeURIComponent(otp)}`);
-                } catch (err) {
-                  setError(err.message);
-                } finally {
-                  setLoading(false);
-                }
-              }}
-            >
-              Set a new password instead
+              {loading ? "Validating Code..." : "Verify Code & Proceed"}
             </button>
 
             <div className="auth-extras" style={{ justifyContent: "center" }}>
               <button
                 type="button"
                 className="auth-link-btn"
-                onClick={() => setStep("email")}
+                onClick={() => { setStep("email"); setOtp(""); setError(""); }}
               >
-                ← Change Email or Resend
+                Change email
               </button>
             </div>
+            <p className="auth-switch">
+              {resendSeconds > 0 ? (
+                `Resend code in ${resendSeconds}s`
+              ) : (
+                <button
+                  type="button"
+                  className="auth-link-btn"
+                  onClick={handleResendOtp}
+                  disabled={loading}
+                >
+                  Resend code
+                </button>
+              )}
+            </p>
           </form>
         )}
       </div>

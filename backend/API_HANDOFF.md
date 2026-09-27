@@ -9,18 +9,20 @@ Authenticated requests use `Authorization: Bearer <token>`. JSON endpoints retur
 | Endpoint | Method | Access | Purpose |
 | --- | --- | --- | --- |
 | `/api/auth/signup` | POST | Public | Create a staff account |
+| `/api/auth/verify-signup-otp` | POST | Public | Verify a new account's email address |
 | `/api/auth/login` | POST | Public | Authenticate and receive a JWT |
 | `/api/auth/me` | GET | Any authenticated role | Get the current user profile |
 | `/api/auth/profile` | GET | Any authenticated role | Existing alias for `/me` |
 | `/api/auth/forgot-password` | POST | Public | Request password-reset OTP |
 | `/api/auth/verify-otp` | POST | Public | Verify reset OTP |
-| `/api/auth/otp-login` | POST | Public | Sign in a Warehouse Staff account using its valid one-time email code |
 | `/api/auth/reset-password` | POST | Public | Set a new password |
 | `/api/auth/change-password` | POST | Any authenticated role | Change password after verifying the current password |
 
-Signup body: `{ "name": "A User", "email": "user@example.com", "password": "secret" }`. A submitted `role` is ignored. Login body: `{ "email": "user@example.com", "password": "secret" }`. Login and signup return `data.token` and `data.user`, including `id`, `name`, `email`, and `role`.
+Signup body: `{ "name": "A User", "email": "user@example.com", "password": "secret" }`. A submitted `role` is ignored. Signup creates an unverified staff account and sends a 6-digit verification code; it returns HTTP 202 without an authentication token. If delivery needs to be retried, submit the same email and password again while the account remains unverified. Verify with `{ "email": "user@example.com", "otp": "<email code>" }` at `/api/auth/verify-signup-otp`; codes expire after 10 minutes, allow at most 5 attempts, are single-use, and can be resent no more than once every 30 seconds. Login is blocked until verification succeeds. Login body: `{ "email": "user@example.com", "password": "secret" }`. Login returns `data.token` and `data.user`, including `id`, `name`, `email`, and `role`.
 
-Forgot-password emails require SMTP configuration. OTPs expire 10 minutes after they are stored using the database clock, and are invalidated if email delivery fails. OTP sign-in is restricted to `WAREHOUSE_STAFF`; any wrong or reused code is rejected. For a private local demo only, set `APP_ENV=development` and `DEV_OTP_CODE=568723` to enable a fixed staff-only code when SMTP is unavailable. Never enable that fallback outside local development. Change-password body: `{ "current_password": "...", "new_password": "..." }`; new passwords require at least 8 characters.
+Signup verification and forgot-password emails require authenticated SMTP configuration. OTP values are HMAC-hashed in the existing `otp_tokens` table, purpose-scoped, expire after 10 minutes using the database clock, allow at most 5 attempts, and are invalidated if delivery fails. Resending is limited to one request per email/purpose every 30 seconds; `429` responses include `Retry-After`. Forgot-password returns the same generic response for registered and unregistered emails to avoid account enumeration; an unregistered address receives no email.
+
+For password reset, verify using `{ "email": "user@example.com", "otp": "<email code>" }` at `/api/auth/verify-otp`. A successful verification consumes the OTP and returns a short-lived `data.reset_token`; the frontend keeps this token in memory, not in the URL. Set a new password using `{ "email": "user@example.com", "reset_token": "<reset token>", "new_password": "..." }` at `/api/auth/reset-password`. The reset grant is HMAC-hashed, expires after 10 minutes, and is single-use. A successful reset returns a JWT and user so the frontend can establish the normal session and navigate to the dashboard. The backend rejects direct reset requests without a valid grant. Change-password body: `{ "current_password": "...", "new_password": "..." }`; new passwords require at least 8 characters.
 
 ## Inventory APIs
 
@@ -59,7 +61,7 @@ Each operation collection supports GET; receipts, deliveries, and transfers also
 
 ## Permissions and Errors
 
-Both roles can view products, read stock, view dashboard/ledger, and create or list receipts, deliveries, transfers, and adjustments. Only `INVENTORY_MANAGER` can mutate products or create categories, warehouses, and locations. Authenticated role failures return HTTP 403; missing or invalid authentication returns HTTP 401. Other expected statuses include 200, 201, 400, 404, and 409.
+Both roles can view products, read stock, view dashboard/ledger, and create or list receipts, deliveries, transfers, and adjustments. Only `INVENTORY_MANAGER` can mutate products or create categories, warehouses, and locations. Authenticated role failures return HTTP 403; missing or invalid authentication returns HTTP 401. Other expected statuses include 200, 201, 202, 400, 404, 409, 429 (OTP resend cooldown), and 503 (SMTP unavailable).
 
 Example frontend call:
 

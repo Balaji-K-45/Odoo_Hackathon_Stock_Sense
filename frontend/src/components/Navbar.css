@@ -9,13 +9,14 @@
   right: 0;
   height: var(--navbar-height);
   background: var(--bg-navbar);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid rgba(124, 58, 237, 0.08);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
   z-index: 90;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 8px 24px rgba(96, 75, 130, 0.08);
+  backdrop-filter: blur(18px);
 }
 
 /* ── Left ───────────────────────────────────────────────── */
@@ -29,7 +30,7 @@
   display: none;
   background: none;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: 16px;
   padding: 6px 10px;
   cursor: pointer;
   font-size: 18px;
@@ -81,7 +82,8 @@
   align-items: center;
   gap: 10px;
   padding: 6px 12px;
-  border-radius: var(--radius-lg);
+  border-radius: 20px;
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
   transition: background var(--transition-fast);
 }

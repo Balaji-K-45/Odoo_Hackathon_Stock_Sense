@@ -3,14 +3,16 @@
 // ──────────────────────────────────────────────────────────
 
 import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { resetPassword } from "../services/authApi";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { resetPassword, login } from "../services/authApi";
+import { useAuth } from "../context/AuthContext";
+import { USE_MOCKS } from "../services/api";
 import "./Auth.css";
 
 export default function ResetPassword() {
-  const [searchParams]         = useSearchParams();
-  const email                  = searchParams.get("email") || "";
-  const otp                    = searchParams.get("otp")   || "";
+  const location               = useLocation();
+  const email                  = location.state?.email || "";
+  const resetToken             = location.state?.resetToken || "";
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm]   = useState("");
@@ -18,6 +20,11 @@ export default function ResetPassword() {
   const [success, setSuccess]   = useState(false);
   const [loading, setLoading]   = useState(false);
   const navigate                = useNavigate();
+  const { loginUser }           = useAuth();
+
+  if (!email || !resetToken) {
+    return <Navigate to="/forgot-password" replace />;
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -37,9 +44,17 @@ export default function ResetPassword() {
 
     setLoading(true);
     try {
-      await resetPassword(email, otp, password);
+      const resetResult = await resetPassword(email, resetToken, password);
+      if (resetResult.token && resetResult.user) {
+        loginUser(resetResult.token, resetResult.user);
+      } else if (USE_MOCKS) {
+        const loginRes = await login(email, password);
+        loginUser(loginRes.token, loginRes.user);
+      } else {
+        throw new Error("Password reset completed but no session was issued");
+      }
       setSuccess(true);
-      setTimeout(() => navigate("/login"), 1800);
+      setTimeout(() => navigate("/dashboard", { replace: true }), 900);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -64,7 +79,7 @@ export default function ResetPassword() {
 
           {success ? (
             <div className="auth-success">
-              ✅ Password updated successfully! Redirecting you to sign in...
+              Password updated successfully. Taking you to your dashboard...
             </div>
           ) : (
             <>
@@ -113,7 +128,7 @@ export default function ResetPassword() {
                 className="btn btn--primary btn--lg auth-submit"
                 disabled={loading}
               >
-                {loading ? "Updating Password..." : "Save Password & Sign In"}
+                {loading ? "Updating Password..." : "Save Password & Continue"}
               </button>
             </>
           )}

@@ -8,15 +8,16 @@ import smtplib
 def is_configured():
     return bool(
         os.getenv("SMTP_HOST")
-        and (os.getenv("SMTP_FROM") or os.getenv("SMTP_USERNAME"))
+        and os.getenv("SMTP_USERNAME")
+        and os.getenv("SMTP_PASSWORD")
     )
 
 
 def send_email(recipient, subject, body):
     host = os.getenv("SMTP_HOST")
-    sender = os.getenv("SMTP_FROM") or os.getenv("SMTP_USERNAME")
-    if not host or not sender:
-        raise RuntimeError("SMTP_HOST and SMTP_FROM must be configured")
+    sender = os.getenv("SMTP_USERNAME")
+    if not host or not sender or not os.getenv("SMTP_PASSWORD"):
+        raise RuntimeError("SMTP configuration is incomplete")
 
     port = int(os.getenv("SMTP_PORT", "587"))
     username = os.getenv("SMTP_USERNAME")
@@ -32,6 +33,5 @@ def send_email(recipient, subject, body):
     with smtplib.SMTP(host, port, timeout=15) as client:
         if use_tls:
             client.starttls()
-        if username and password:
-            client.login(username, password)
+        client.login(username, password)
         client.send_message(message)

@@ -1,7 +1,7 @@
 """
 services/auth_service.py
 -------------------------
-Signup, login, OTP-based password reset.
+Signup, login, password reset via OTP, and authenticated password changes.
 
 Password hashing uses werkzeug (already a Flask dependency — no extra install).
 Password-reset OTPs are delivered through the configured SMTP service and are
@@ -9,6 +9,8 @@ never included in API responses.
 """
 
 import secrets
+import hashlib
+import hmac
 from datetime import datetime, timedelta
 import logging
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -17,8 +19,9 @@ import os
 
 from models.user import (
     get_user_by_email, create_user, update_password,
-    save_otp, get_valid_otp, mark_otp_used, get_user_by_id,
-    invalidate_otps,
+    save_otp, invalidate_otps, consume_signup_otp,
+    verify_reset_otp_and_issue_grant, complete_password_reset,
+    OtpCooldownError,
 )
 from services.email_service import is_configured, send_email
 
@@ -28,6 +31,23 @@ TOKEN_EXPIRY_HOURS = 24
 
 # ── Public signup role ───────────────────────────────────────────────────────
 WAREHOUSE_STAFF = "WAREHOUSE_STAFF"
+
+
+def _otp_digest(purpose, email, value):
+    secret = os.getenv("SECRET_KEY", "").strip()
+    if not secret or secret == "dev-secret-change-me":
+        raise RuntimeError("A non-default SECRET_KEY is required for OTP storage")
+    payload = f"{purpose}:{email}:{value}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+
+
+def _otp_security_configured():
+    secret = os.getenv("SECRET_KEY", "").strip()
+    return bool(secret and secret != "dev-secret-change-me")
+
+
+def _new_otp():
+    return f"{secrets.randbelow(1_000_000):06d}"
 
 
 # ── Signup ───────────────────────────────────────────────────────────────────
@@ -45,14 +65,49 @@ def signup(name, email, password):
     # Public registration must never grant elevated privileges.
     role = WAREHOUSE_STAFF
 
-    if get_user_by_email(email):
-        return None, "Email already registered"
+    existing_user = get_user_by_email(email)
+    if existing_user:
+        if existing_user.get("email_verified", 1):
+            return None, "Email already registered"
+        if not check_password_hash(existing_user["password_hash"], password):
+            return None, "Email already registered"
+        return _send_signup_otp(email)
+
+    if not is_configured():
+        return None, "Email delivery is not configured on this server"
+    if not _otp_security_configured():
+        return None, "Email security configuration is not configured on this server"
 
     hashed = generate_password_hash(password)
-    user_id = create_user(name, email, hashed, role)
-    token = _make_token(user_id, email, role)
-    return {"token": token, "user": {"id": user_id, "name": name,
-                                      "email": email, "role": role}}, None
+    create_user(name, email, hashed, role, email_verified=False)
+    return _send_signup_otp(email)
+
+
+def _send_signup_otp(email):
+    if not is_configured():
+        return None, "Email delivery is not configured on this server"
+    if not _otp_security_configured():
+        return None, "Email security configuration is not configured on this server"
+
+    otp = _new_otp()
+    try:
+        saved = save_otp(email, _otp_digest("signup", email, otp), purpose="signup")
+    except OtpCooldownError:
+        raise
+    if not saved:
+        return None, "Unable to send verification email. Please try again later."
+    try:
+        send_email(
+            email,
+            "StockSense - Verify Your Email",
+            f"Your StockSense verification OTP is:\n\n{otp}\n\nThis OTP expires in 10 minutes.\n\nIf you did not create this account, please ignore this email.",
+        )
+    except Exception:
+        invalidate_otps(email, purpose="signup")
+        logging.getLogger(__name__).warning("Signup verification email delivery failed")
+        return None, "Unable to send verification email. Please try again later."
+
+    return {"email": email, "message": "Verification code sent"}, None
 
 
 # ── Login ────────────────────────────────────────────────────────────────────
@@ -65,6 +120,8 @@ def login(email, password):
     user = get_user_by_email(email)
     if not user or not check_password_hash(user["password_hash"], password):
         return None, "Invalid email or password"
+    if not user.get("email_verified", 1):
+        return None, "Please verify your email before signing in"
 
     token = _make_token(user["id"], user["email"], user["role"])
     return {
@@ -78,49 +135,55 @@ def login(email, password):
     }, None
 
 
+def verify_signup_otp(email, otp):
+    email = (email or "").strip().lower()
+    otp = str(otp or "").strip()
+    if not email or not otp:
+        return None, "Email and verification code are required"
+    if len(otp) != 6 or not otp.isdigit():
+        return None, "Invalid or expired verification code"
+    status = consume_signup_otp(email, _otp_digest("signup", email, otp))
+    if status == "expired":
+        return None, "OTP expired. Please request a new OTP."
+    if status == "locked":
+        return None, "Too many incorrect attempts. Please request a new OTP."
+    if status != "verified":
+        return None, "Invalid or expired verification code"
+    return {"email": email, "verified": True}, None
+
+
 # ── Forgot password (send OTP) ────────────────────────────────────────────────
 
 def send_otp(email):
     email = (email or "").strip().lower()
     if not email:
         return None, "Email is required"
-
-    development_code = os.getenv("DEV_OTP_CODE", "")
-    if (
-        os.getenv("APP_ENV", "production").lower() == "development"
-        and len(development_code) == 6
-        and development_code.isdigit()
-    ):
-        user = get_user_by_email(email)
-        if not user:
-            return {"message": "If this email is registered, a reset code has been sent."}, None
-        if user["role"] == WAREHOUSE_STAFF:
-            save_otp(email, development_code)
-            return {
-                "message": "Development sign-in code created.",
-                "development_otp": development_code,
-            }, None
-
     if not is_configured():
         return None, "Email delivery is not configured on this server"
 
     user = get_user_by_email(email)
     if not user:
-        # Security: don't reveal whether email is registered
         return {"message": "If this email is registered, an OTP has been sent"}, None
+    if not _otp_security_configured():
+        return None, "Email security configuration is not configured on this server"
 
-    otp = f"{secrets.randbelow(1_000_000):06d}"
-    save_otp(email, otp)
+    otp = _new_otp()
+    try:
+        saved = save_otp(email, _otp_digest("password_reset", email, otp), purpose="password_reset")
+    except OtpCooldownError:
+        raise
+    if not saved:
+        return {"message": "If this email is registered, an OTP has been sent"}, None
     try:
         send_email(
             email,
-            "StockSense password reset code",
-            f"Your StockSense password reset code is {otp}. It expires in 10 minutes.\n\nIf you did not request this, ignore this email.",
+            "StockSense - Password Reset OTP",
+            f"Your StockSense password reset OTP is:\n\n{otp}\n\nThis OTP expires in 10 minutes.\n\nIf you did not request a password reset, you can ignore this email.",
         )
     except Exception:
-        invalidate_otps(email)
-        logging.getLogger(__name__).exception("Password reset email delivery failed")
-        return {"message": "If this email is registered, a reset code has been sent."}, None
+        invalidate_otps(email, purpose="password_reset")
+        logging.getLogger(__name__).warning("Password reset email delivery failed")
+        return None, "Unable to send reset email. Please try again later."
 
     return {"message": "If this email is registered, a reset code has been sent."}, None
 
@@ -129,23 +192,42 @@ def send_otp(email):
 
 def verify_otp(email, otp):
     email = (email or "").strip().lower()
-    row = get_valid_otp(email, otp)
-    if not row:
+    otp = str(otp or "").strip()
+    if not email or len(otp) != 6 or not otp.isdigit():
         return None, "Invalid or expired OTP"
-    # Don't mark used yet — user still needs to reset password
-    return {"valid": True, "email": email}, None
+    reset_token = secrets.token_urlsafe(32)
+    status = verify_reset_otp_and_issue_grant(
+        email,
+        _otp_digest("password_reset", email, otp),
+        _otp_digest("password_reset_grant", email, reset_token),
+    )
+    if status == "expired":
+        return None, "OTP expired. Please request a new OTP."
+    if status == "locked":
+        return None, "Too many incorrect attempts. Please request a new OTP."
+    if status != "verified":
+        return None, "Invalid or expired OTP"
+    return {"valid": True, "email": email, "reset_token": reset_token}, None
 
 
-def login_with_otp(email, otp):
+# ── Reset password ────────────────────────────────────────────────────────────
+
+def reset_password(email, reset_token, new_password):
     email = (email or "").strip().lower()
-    user = get_user_by_email(email)
-    row = get_valid_otp(email, otp)
-    if not user or not row or user["role"] != WAREHOUSE_STAFF:
-        return None, "Invalid or expired sign-in code"
+    if not new_password or len(new_password) < 6:
+        return None, "Password must be at least 6 characters"
+    if not email or not reset_token:
+        return None, "Password reset authorization is missing or expired"
 
-    mark_otp_used(row["id"])
+    user = complete_password_reset(
+        _otp_digest("password_reset_grant", email, reset_token),
+        generate_password_hash(new_password),
+    )
+    if not user:
+        return None, "Password reset authorization is invalid or expired"
     token = _make_token(user["id"], user["email"], user["role"])
     return {
+        "message": "Password reset successfully",
         "token": token,
         "user": {
             "id": user["id"],
@@ -154,23 +236,6 @@ def login_with_otp(email, otp):
             "role": user["role"],
         },
     }, None
-
-
-# ── Reset password ────────────────────────────────────────────────────────────
-
-def reset_password(email, otp, new_password):
-    email = (email or "").strip().lower()
-    if not new_password or len(new_password) < 6:
-        return None, "Password must be at least 6 characters"
-
-    row = get_valid_otp(email, otp)
-    if not row:
-        return None, "Invalid or expired OTP"
-
-    mark_otp_used(row["id"])
-    hashed = generate_password_hash(new_password)
-    update_password(email, hashed)
-    return {"message": "Password reset successfully"}, None
 
 
 def change_password(email, current_password, new_password):
